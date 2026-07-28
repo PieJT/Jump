@@ -54,6 +54,11 @@ export function useYouTubePlayer(options: UseYouTubePlayerOptions): YouTubePlaye
               playerRef.current?.playVideo();
             }
           },
+          onError: (event) => {
+            // YT error codes: 2=invalid video id, 5=HTML5 player error,
+            // 100=video not found/private, 101/150=embedding disabled by uploader
+            console.error("[YouTube Player] onError, code:", event.data);
+          },
           onStateChange: (event) => {
             const YTState = window.YT!.PlayerState;
             if (event.data === YTState.PLAYING) {
@@ -107,6 +112,7 @@ export function useYouTubePlayer(options: UseYouTubePlayerOptions): YouTubePlaye
 
   return {
     loadVideo: (videoId: string) => {
+      console.log("[YouTube Player] loadVideo called with id:", videoId);
       if (!readyRef.current || !playerRef.current) {
         // Player (or the underlying iframe API) isn't ready yet — remember
         // this request and fire it from onReady instead of dropping it.
