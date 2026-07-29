@@ -8,8 +8,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import type { Playlist, Track } from "../types";
 import { useYouTubePlayer } from "./useYouTubePlayer";
+import { useAuth } from "./AuthContext";
+import { db } from "../lib/firebase";
 import { extractDominantColor } from "../lib/color";
 
 const WORKER_URL_STORAGE_KEY = "aura:workerUrl";
@@ -78,6 +81,9 @@ interface PlayerContextValue {
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const uid = user?.uid ?? null;
+
   const [workerUrlState, setWorkerUrlState] = useState<string>(
     () => localStorage.getItem(WORKER_URL_STORAGE_KEY) ?? ""
   );
@@ -88,9 +94,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [recentlyPlayed, setRecentlyPlayed] = useState<Track[]>([]);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
 
+  // Seeded from localStorage first so the UI has something to show instantly;
+  // Firestore then takes over as the source of truth once it loads (see below).
   const [likedTracks, setLikedTracks] = useState<Track[]>(() => readJSON(LIKED_STORAGE_KEY, [] as Track[]));
   const [playlists, setPlaylists] = useState<Playlist[]>(() => readJSON(PLAYLISTS_STORAGE_KEY, [] as Playlist[]));
 
+  // Keeps a local cache so the app still works offline / before Firestore responds.
   useEffect(() => {
     localStorage.setItem(LIKED_STORAGE_KEY, JSON.stringify(likedTracks));
   }, [likedTracks]);
@@ -98,6 +107,61 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem(PLAYLISTS_STORAGE_KEY, JSON.stringify(playlists));
   }, [playlists]);
+
+  // ---------- Firestore sync: tie liked songs + playlists to the signed-in account ----------
+  // `hasLoadedRemoteRef` blocks the write-effect below from firing with stale/local
+  // data before we've heard back from Firestore at least once.
+  // `skipNextWriteRef` prevents the write-effect from immediately re-uploading data
+  // that we just received *from* Firestore (which would otherwise loop harmlessly
+  // but pointlessly).
+  const hasLoadedRemoteRef = useRef(false);
+  const skipNextWriteRef = useRef(false);
+
+  useEffect(() => {
+    hasLoadedRemoteRef.current = false;
+    if (!uid) return;
+
+    const userDoc = doc(db, "users", uid);
+    const unsubscribe = onSnapshot(
+      userDoc,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as { likedTracks?: Track[]; playlists?: Playlist[] };
+          skipNextWriteRef.current = true;
+          setLikedTracks(data.likedTracks ?? []);
+          setPlaylists(data.playlists ?? []);
+        } else {
+          // First time this account has signed in — seed their Firestore doc with
+          // whatever's already sitting in this browser's local storage.
+          setDoc(userDoc, {
+            likedTracks: readJSON(LIKED_STORAGE_KEY, [] as Track[]),
+            playlists: readJSON(PLAYLISTS_STORAGE_KEY, [] as Playlist[]),
+          }).catch((err) => console.error("[Firestore] failed to seed user doc:", err));
+        }
+        hasLoadedRemoteRef.current = true;
+      },
+      (err) => console.error("[Firestore] onSnapshot error (check rules/uid):", err)
+    );
+
+    return () => unsubscribe();
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+    if (!hasLoadedRemoteRef.current) return;
+    if (skipNextWriteRef.current) {
+      skipNextWriteRef.current = false;
+      return;
+    }
+    // Debounced so rapid changes (e.g. adding several tracks in a row) don't
+    // trigger a Firestore write per keystroke/click.
+    const timer = window.setTimeout(() => {
+      setDoc(doc(db, "users", uid), { likedTracks, playlists }, { merge: true }).catch((err) =>
+        console.error("[Firestore] failed to write playlists/liked:", err)
+      );
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [uid, likedTracks, playlists]);
 
   useEffect(() => {
     if (!playbackError) return;
