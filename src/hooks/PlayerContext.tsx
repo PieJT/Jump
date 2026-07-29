@@ -55,6 +55,8 @@ interface PlayerContextValue {
   next: () => void;
   prev: () => void;
   seekToFraction: (fraction: number) => void;
+  /** Moves the track at fromIndex to toIndex (toIndex given in the resulting array's terms). Keeps the currently-playing track pointed at correctly. */
+  reorderQueue: (fromIndex: number, toIndex: number) => void;
 
   // ---- Library: liked songs ----
   likedTracks: Track[];
@@ -218,6 +220,31 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [controls]
   );
 
+  const reorderQueue = useCallback((fromIndex: number, toIndex: number) => {
+    setQueue((prev) => {
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= prev.length ||
+        toIndex >= prev.length
+      ) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+    setCurrentIndex((prevIndex) => {
+      if (fromIndex === toIndex || prevIndex < 0) return prevIndex;
+      if (fromIndex === prevIndex) return toIndex;
+      if (fromIndex < prevIndex && toIndex >= prevIndex) return prevIndex - 1;
+      if (fromIndex > prevIndex && toIndex <= prevIndex) return prevIndex + 1;
+      return prevIndex;
+    });
+  }, []);
+
   // ---------- Library: liked songs ----------
   const isLiked = useCallback((trackId: string) => likedTracks.some((t) => t.id === trackId), [likedTracks]);
 
@@ -301,6 +328,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       next,
       prev,
       seekToFraction,
+      reorderQueue,
       likedTracks,
       isLiked,
       toggleLiked,
@@ -330,6 +358,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       next,
       prev,
       seekToFraction,
+      reorderQueue,
       likedTracks,
       isLiked,
       toggleLiked,
