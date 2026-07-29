@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { ViewName } from "./types";
 import { PlayerProvider, usePlayer } from "./hooks/PlayerContext";
+import { AuthProvider, useAuth } from "./hooks/AuthContext";
+import { LoginPage } from "./components/LoginPage";
 import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { HomeView } from "./components/HomeView";
@@ -11,6 +13,7 @@ import { PlaylistView } from "./components/PlaylistView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { NowPlayingFull } from "./components/NowPlayingFull";
 import { WorkerUrlModal } from "./components/WorkerUrlModal";
+import { AccountModal } from "./components/AccountModal";
 import "./App.css";
 
 function AppShell() {
@@ -19,6 +22,7 @@ function AppShell() {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [fullPlayerOpen, setFullPlayerOpen] = useState(false);
   const [workerModalOpen, setWorkerModalOpen] = useState(false);
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
 
   const openPlaylist = (id: string) => {
     setSelectedPlaylistId(id);
@@ -42,6 +46,7 @@ function AppShell() {
           onNavigate={navigate}
           workerConnected={!!workerUrl}
           onOpenWorkerModal={() => setWorkerModalOpen(true)}
+          onOpenAccountModal={() => setAccountModalOpen(true)}
         />
 
         <main className="content">
@@ -56,11 +61,17 @@ function AppShell() {
 
         <MiniPlayer onOpenFullPlayer={() => setFullPlayerOpen(true)} />
 
-        <TabBar activeView={view} onNavigate={navigate} onOpenWorkerModal={() => setWorkerModalOpen(true)} />
+        <TabBar
+          activeView={view}
+          onNavigate={navigate}
+          onOpenWorkerModal={() => setWorkerModalOpen(true)}
+          onOpenAccountModal={() => setAccountModalOpen(true)}
+        />
       </div>
 
       <NowPlayingFull open={fullPlayerOpen} onClose={() => setFullPlayerOpen(false)} />
       <WorkerUrlModal open={workerModalOpen} onClose={() => setWorkerModalOpen(false)} />
+      <AccountModal open={accountModalOpen} onClose={() => setAccountModalOpen(false)} />
 
       {/* Hidden target the YouTube IFrame API mounts into */}
       <div id="yt-target" />
@@ -68,10 +79,23 @@ function AppShell() {
   );
 }
 
-export default function App() {
+function Gate() {
+  const { user, loading } = useAuth();
+
+  if (loading) return null;
+  if (!user) return <LoginPage />;
+
   return (
     <PlayerProvider>
       <AppShell />
     </PlayerProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
   );
 }

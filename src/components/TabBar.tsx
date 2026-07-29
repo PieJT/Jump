@@ -1,13 +1,14 @@
 import type { ViewName } from "../types";
-import { HomeIcon, SearchIcon, QueueIcon, WorkerIcon } from "./Icons";
+import { HomeIcon, SearchIcon, QueueIcon, WorkerIcon, AccountIcon } from "./Icons";
 
 interface TabBarProps {
   activeView: ViewName;
   onNavigate: (view: ViewName) => void;
   onOpenWorkerModal: () => void;
+  onOpenAccountModal: () => void;
 }
 
-export function TabBar({ activeView, onNavigate, onOpenWorkerModal }: TabBarProps) {
+export function TabBar({ activeView, onNavigate, onOpenWorkerModal, onOpenAccountModal }: TabBarProps) {
   return (
     <nav className="tab-bar">
       <div className={`tab-item${activeView === "home" ? " active" : ""}`} onClick={() => onNavigate("home")}>
@@ -25,6 +26,10 @@ export function TabBar({ activeView, onNavigate, onOpenWorkerModal }: TabBarProp
       <div className="tab-item" onClick={onOpenWorkerModal}>
         <WorkerIcon />
         <span>Worker</span>
+      </div>
+      <div className="tab-item" onClick={onOpenAccountModal}>
+        <AccountIcon />
+        <span>Account</span>
       </div>
     </nav>
   );

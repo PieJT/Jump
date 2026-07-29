@@ -1,4 +1,5 @@
 import type { ViewName } from "../types";
+import { useAuth } from "../hooks/AuthContext";
 import { HomeIcon, SearchIcon, QueueIcon, LibraryIcon, WorkerIcon } from "./Icons";
 
 interface SidebarProps {
@@ -6,9 +7,18 @@ interface SidebarProps {
   onNavigate: (view: ViewName) => void;
   workerConnected: boolean;
   onOpenWorkerModal: () => void;
+  onOpenAccountModal: () => void;
 }
 
-export function Sidebar({ activeView, onNavigate, workerConnected, onOpenWorkerModal }: SidebarProps) {
+export function Sidebar({
+  activeView,
+  onNavigate,
+  workerConnected,
+  onOpenWorkerModal,
+  onOpenAccountModal,
+}: SidebarProps) {
+  const { user } = useAuth();
+  const initial = (user?.displayName?.[0] ?? user?.email?.[0] ?? "?").toUpperCase();
   return (
     <aside className="sidebar">
       <div className="logo">
@@ -41,6 +51,10 @@ export function Sidebar({ activeView, onNavigate, workerConnected, onOpenWorkerM
         <div className={`key-dot${workerConnected ? " ok" : ""}`} />
         <WorkerIcon width={16} height={16} />
         <span>{workerConnected ? "Worker connected" : "Set Worker URL"}</span>
+      </div>
+      <div className="key-btn account-btn" onClick={onOpenAccountModal}>
+        <div className="account-btn-avatar">{initial}</div>
+        <span>{user?.displayName || user?.email || "Account"}</span>
       </div>
     </aside>
   );
