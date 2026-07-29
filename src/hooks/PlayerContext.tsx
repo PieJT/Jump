@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -29,6 +30,7 @@ interface PlayerContextValue {
   isPlaying: boolean;
   progress: Progress;
   recentlyPlayed: Track[];
+  playbackError: string | null;
 
   playFromResults: (tracks: Track[], startIndex: number) => void;
   playFromQueue: (index: number) => void;
@@ -50,6 +52,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState<Progress>({ current: 0, duration: 0 });
   const [recentlyPlayed, setRecentlyPlayed] = useState<Track[]>([]);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!playbackError) return;
+    const timer = window.setTimeout(() => setPlaybackError(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [playbackError]);
 
   // Keep a ref mirror of queue/currentIndex so the "ended" callback
   // (captured once inside useYouTubePlayer) always sees fresh values.
@@ -85,7 +94,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const nextIndex = currentIndexRef.current + 1;
       if (nextIndex < queueRef.current.length) playIndex(nextIndex);
     },
-    onPlayingChange: setIsPlaying,
+    onError: (code) => {
+      const track = queueRef.current[currentIndexRef.current];
+      const reason =
+        code === 101 || code === 150
+          ? "unavailable for playback outside YouTube"
+          : code === 100
+          ? "not found or private"
+          : "unavailable";
+      setPlaybackError(track ? `"${track.title}" is ${reason} — skipping` : "Track unavailable — skipping");
+
+      const nextIndex = currentIndexRef.current + 1;
+      if (nextIndex < queueRef.current.length) {
+        playIndex(nextIndex);
+      } else {
+        setIsPlaying(false);
+      }
+    },
+    onPlayingChange: (playing) => {
+      setIsPlaying(playing);
+      if (playing) setPlaybackError(null);
+    },
     onProgress: (current, duration) => setProgress({ current, duration }),
   });
 
@@ -154,6 +183,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       isPlaying,
       progress,
       recentlyPlayed,
+      playbackError,
       playFromResults,
       playFromQueue,
       playRecent,
@@ -170,6 +200,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       isPlaying,
       progress,
       recentlyPlayed,
+      playbackError,
       playFromResults,
       playFromQueue,
       playRecent,

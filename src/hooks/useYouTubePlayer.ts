@@ -6,6 +6,7 @@ const PROGRESS_INTERVAL_MS = 500;
 
 interface UseYouTubePlayerOptions {
   onEnded: () => void;
+  onError: (code: number) => void;
   onPlayingChange: (isPlaying: boolean) => void;
   onProgress: (currentSeconds: number, durationSeconds: number) => void;
 }
@@ -58,6 +59,7 @@ export function useYouTubePlayer(options: UseYouTubePlayerOptions): YouTubePlaye
             // YT error codes: 2=invalid video id, 5=HTML5 player error,
             // 100=video not found/private, 101/150=embedding disabled by uploader
             console.error("[YouTube Player] onError, code:", event.data);
+            optionsRef.current.onError(event.data);
           },
           onStateChange: (event) => {
             const YTState = window.YT!.PlayerState;

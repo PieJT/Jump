@@ -6,14 +6,16 @@ interface MiniPlayerProps {
 }
 
 export function MiniPlayer({ onOpenFullPlayer }: MiniPlayerProps) {
-  const { currentTrack, isPlaying, progress, togglePlay, next, prev } = usePlayer();
+  const { currentTrack, isPlaying, progress, togglePlay, next, prev, playbackError } = usePlayer();
 
   if (!currentTrack) return null;
 
   const pct = progress.duration ? (progress.current / progress.duration) * 100 : 0;
 
   return (
-    <div className="mini-player show" onClick={onOpenFullPlayer}>
+    <>
+      {playbackError && <div className="playback-error-toast">{playbackError}</div>}
+      <div className="mini-player show" onClick={onOpenFullPlayer}>
       <div className="mini-progress">
         <div className="mini-progress-fill" style={{ width: `${pct}%` }} />
       </div>
@@ -34,5 +36,6 @@ export function MiniPlayer({ onOpenFullPlayer }: MiniPlayerProps) {
         </button>
       </div>
     </div>
+    </>
   );
-}
+} 

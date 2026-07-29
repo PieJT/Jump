@@ -13,7 +13,7 @@ export function Sidebar({ activeView, onNavigate, workerConnected, onOpenWorkerM
     <aside className="sidebar">
       <div className="logo">
         <div className="logo-mark" />
-        Aura
+        <span className="logo-text">Aura</span>
       </div>
       <nav className="nav">
         <div className={`nav-item${activeView === "home" ? " active" : ""}`} onClick={() => onNavigate("home")}>

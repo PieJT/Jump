@@ -32,7 +32,7 @@ function AppShell() {
         />
 
         <main className="content">
-          {view === "home" && <HomeView />}
+          {view === "home" && <HomeView onNeedWorker={() => setWorkerModalOpen(true)} />}
           {view === "search" && <SearchView onNeedWorker={() => setWorkerModalOpen(true)} />}
           {view === "queue" && <QueueView />}
         </main>
