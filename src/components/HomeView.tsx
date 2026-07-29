@@ -3,6 +3,7 @@ import { usePlayer } from "../hooks/PlayerContext";
 import { searchTracks } from "../lib/youtubeMusic";
 import { auroraGradient } from "../lib/gradient";
 import { RECOMMENDED_PLAYLISTS, RECOMMENDED_ARTISTS } from "../lib/recommendations";
+import { loadThumbCache, getFreshThumbs, mergeAndPersist } from "../lib/thumbCache";
 import { RowItem } from "./RowItem";
 import { EmptyState } from "./EmptyState";
 import { HeartIcon, PlayIcon } from "./Icons";
@@ -25,32 +26,45 @@ export function HomeView({ onNeedWorker, onOpenPlaylist }: HomeViewProps) {
   } = usePlayer();
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Representative artwork per tile, keyed by its seed query/name — pulled
-  // from the first search result for that seed. Falls back to the aurora
-  // gradient wherever a thumbnail couldn't be fetched.
+  // Representative artwork per tile, keyed by its seed query/name — only used
+  // as a fallback for entries that don't have a hardcoded `thumb` set in
+  // lib/recommendations.ts. Falls back further to the aurora gradient
+  // wherever nothing could be fetched either.
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!workerUrl) return;
     let cancelled = false;
 
-    const seeds = [
-      ...RECOMMENDED_PLAYLISTS.map((p) => p.query),
-      ...RECOMMENDED_ARTISTS,
+    // Only seeds without a hardcoded thumb need a search request at all.
+    const missing = [
+      ...RECOMMENDED_PLAYLISTS.filter((p) => !p.thumb).map((p) => p.query),
+      ...RECOMMENDED_ARTISTS.filter((a) => !a.thumb).map((a) => a.name),
     ];
+    if (missing.length === 0) return;
+
+    // Paint instantly with whatever's cached from a previous session.
+    const cache = loadThumbCache();
+    const fresh = getFreshThumbs(cache);
+    setThumbs((prev) => ({ ...fresh, ...prev }));
+
+    const stillMissing = missing.filter((seed) => !fresh[seed]);
+    if (stillMissing.length === 0) return;
 
     Promise.allSettled(
-      seeds.map(async (seed) => {
+      stillMissing.map(async (seed) => {
         const tracks = await searchTracks(workerUrl, seed);
         return { seed, thumb: tracks[0]?.thumb };
       })
     ).then((results) => {
       if (cancelled) return;
-      const next: Record<string, string> = {};
+      const updates: Record<string, string> = {};
       for (const r of results) {
-        if (r.status === "fulfilled" && r.value.thumb) next[r.value.seed] = r.value.thumb;
+        if (r.status === "fulfilled" && r.value.thumb) updates[r.value.seed] = r.value.thumb;
       }
-      setThumbs(next);
+      if (Object.keys(updates).length === 0) return;
+      setThumbs((prev) => ({ ...prev, ...updates }));
+      mergeAndPersist(cache, updates);
     });
 
     return () => {
@@ -114,44 +128,44 @@ export function HomeView({ onNeedWorker, onOpenPlaylist }: HomeViewProps) {
 
       <div className="section-label">Recommended playlists</div>
       <div className="rec-grid">
-        {RECOMMENDED_PLAYLISTS.map((p) => (
-          <div
-            key={p.query}
-            className="rec-card"
-            style={{
-              background: thumbs[p.query]
-                ? `url(${thumbs[p.query]}) center/cover`
-                : auroraGradient(p.query),
-            }}
-            onClick={() => handlePlayQuery(p.query, p.query)}
-          >
-            <div className="rec-card-title">{p.title}</div>
-            <div className={`rec-play-badge${loadingKey === p.query ? " loading" : ""}`}>
-              {loadingKey === p.query ? <span className="rec-spinner" /> : <PlayIcon />}
+        {RECOMMENDED_PLAYLISTS.map((p) => {
+          const thumb = p.thumb ?? thumbs[p.query];
+          return (
+            <div
+              key={p.query}
+              className="rec-card"
+              style={{ background: thumb ? `url(${thumb}) center/cover` : auroraGradient(p.query) }}
+              onClick={() => handlePlayQuery(p.query, p.query)}
+            >
+              <div className="rec-card-title">{p.title}</div>
+              <div className={`rec-play-badge${loadingKey === p.query ? " loading" : ""}`}>
+                {loadingKey === p.query ? <span className="rec-spinner" /> : <PlayIcon />}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="section-label">Artists to explore</div>
       <div className="artist-row">
-        {RECOMMENDED_ARTISTS.map((name) => (
-          <div key={name} className="artist-tile" onClick={() => handlePlayQuery(name, name)}>
-            <div
-              className="artist-avatar"
-              style={{
-                background: thumbs[name] ? `url(${thumbs[name]}) center/cover` : auroraGradient(name),
-              }}
-            >
-              {loadingKey === name ? (
-                <span className="rec-spinner" />
-              ) : !thumbs[name] ? (
-                name.charAt(0)
-              ) : null}
+        {RECOMMENDED_ARTISTS.map((a) => {
+          const thumb = a.thumb ?? thumbs[a.name];
+          return (
+            <div key={a.name} className="artist-tile" onClick={() => handlePlayQuery(a.name, a.name)}>
+              <div
+                className="artist-avatar"
+                style={{ background: thumb ? `url(${thumb}) center/cover` : auroraGradient(a.name) }}
+              >
+                {loadingKey === a.name ? (
+                  <span className="rec-spinner" />
+                ) : !thumb ? (
+                  a.name.charAt(0)
+                ) : null}
+              </div>
+              <div className="artist-name">{a.name}</div>
             </div>
-            <div className="artist-name">{name}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {loadError && <div className="home-inline-error">{loadError}</div>}
