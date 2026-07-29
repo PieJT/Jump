@@ -10,4 +10,11 @@ export interface SearchResponse {
   error?: string;
 }
 
-export type ViewName = "home" | "search" | "queue";
+export interface Playlist {
+  id: string;
+  name: string;
+  tracks: Track[];
+  createdAt: number;
+}
+
+export type ViewName = "home" | "search" | "queue" | "library" | "playlist";  

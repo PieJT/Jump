@@ -8,16 +8,32 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Track } from "../types";
+import type { Playlist, Track } from "../types";
 import { useYouTubePlayer } from "./useYouTubePlayer";
 import { extractDominantColor } from "../lib/color";
 
 const WORKER_URL_STORAGE_KEY = "aura:workerUrl";
+const PLAYLISTS_STORAGE_KEY = "aura:playlists";
+const LIKED_STORAGE_KEY = "aura:liked";
 const RECENTS_LIMIT = 12;
 
 interface Progress {
   current: number;
   duration: number;
+}
+
+function readJSON<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function makeId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 interface PlayerContextValue {
@@ -39,6 +55,22 @@ interface PlayerContextValue {
   next: () => void;
   prev: () => void;
   seekToFraction: (fraction: number) => void;
+
+  // ---- Library: liked songs ----
+  likedTracks: Track[];
+  isLiked: (trackId: string) => boolean;
+  toggleLiked: (track: Track) => void;
+  playLiked: () => void;
+
+  // ---- Playlists ----
+  playlists: Playlist[];
+  createPlaylist: (name: string) => Playlist;
+  deletePlaylist: (playlistId: string) => void;
+  renamePlaylist: (playlistId: string, name: string) => void;
+  addTrackToPlaylist: (playlistId: string, track: Track) => void;
+  removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
+  playPlaylist: (playlistId: string, startIndex?: number) => void;
+  getPlaylist: (playlistId: string) => Playlist | undefined;
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -54,6 +86,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [recentlyPlayed, setRecentlyPlayed] = useState<Track[]>([]);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
 
+  const [likedTracks, setLikedTracks] = useState<Track[]>(() => readJSON(LIKED_STORAGE_KEY, [] as Track[]));
+  const [playlists, setPlaylists] = useState<Playlist[]>(() => readJSON(PLAYLISTS_STORAGE_KEY, [] as Playlist[]));
+
+  useEffect(() => {
+    localStorage.setItem(LIKED_STORAGE_KEY, JSON.stringify(likedTracks));
+  }, [likedTracks]);
+
+  useEffect(() => {
+    localStorage.setItem(PLAYLISTS_STORAGE_KEY, JSON.stringify(playlists));
+  }, [playlists]);
+
   useEffect(() => {
     if (!playbackError) return;
     const timer = window.setTimeout(() => setPlaybackError(null), 4000);
@@ -66,6 +109,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   queueRef.current = queue;
   const currentIndexRef = useRef(currentIndex);
   currentIndexRef.current = currentIndex;
+  const playlistsRef = useRef(playlists);
+  playlistsRef.current = playlists;
 
   const addToRecent = useCallback((track: Track) => {
     setRecentlyPlayed((prev) => [track, ...prev.filter((t) => t.id !== track.id)].slice(0, RECENTS_LIMIT));
@@ -173,6 +218,71 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [controls]
   );
 
+  // ---------- Library: liked songs ----------
+  const isLiked = useCallback((trackId: string) => likedTracks.some((t) => t.id === trackId), [likedTracks]);
+
+  const toggleLiked = useCallback((track: Track) => {
+    setLikedTracks((prev) =>
+      prev.some((t) => t.id === track.id) ? prev.filter((t) => t.id !== track.id) : [track, ...prev]
+    );
+  }, []);
+
+  const playLiked = useCallback(() => {
+    if (likedTracks.length === 0) return;
+    const newQueue = [...likedTracks];
+    setQueue(newQueue);
+    queueRef.current = newQueue;
+    playIndex(0);
+  }, [likedTracks, playIndex]);
+
+  // ---------- Playlists ----------
+  const createPlaylist = useCallback((name: string) => {
+    const playlist: Playlist = { id: makeId(), name: name.trim() || "New Playlist", tracks: [], createdAt: Date.now() };
+    setPlaylists((prev) => [playlist, ...prev]);
+    return playlist;
+  }, []);
+
+  const deletePlaylist = useCallback((playlistId: string) => {
+    setPlaylists((prev) => prev.filter((p) => p.id !== playlistId));
+  }, []);
+
+  const renamePlaylist = useCallback((playlistId: string, name: string) => {
+    setPlaylists((prev) => prev.map((p) => (p.id === playlistId ? { ...p, name: name.trim() || p.name } : p)));
+  }, []);
+
+  const addTrackToPlaylist = useCallback((playlistId: string, track: Track) => {
+    setPlaylists((prev) =>
+      prev.map((p) =>
+        p.id === playlistId && !p.tracks.some((t) => t.id === track.id)
+          ? { ...p, tracks: [...p.tracks, track] }
+          : p
+      )
+    );
+  }, []);
+
+  const removeTrackFromPlaylist = useCallback((playlistId: string, trackId: string) => {
+    setPlaylists((prev) =>
+      prev.map((p) => (p.id === playlistId ? { ...p, tracks: p.tracks.filter((t) => t.id !== trackId) } : p))
+    );
+  }, []);
+
+  const getPlaylist = useCallback(
+    (playlistId: string) => playlistsRef.current.find((p) => p.id === playlistId),
+    []
+  );
+
+  const playPlaylist = useCallback(
+    (playlistId: string, startIndex = 0) => {
+      const playlist = playlistsRef.current.find((p) => p.id === playlistId);
+      if (!playlist || playlist.tracks.length === 0) return;
+      const newQueue = playlist.tracks.slice(startIndex);
+      setQueue(newQueue);
+      queueRef.current = newQueue;
+      playIndex(0);
+    },
+    [playIndex]
+  );
+
   const value = useMemo<PlayerContextValue>(
     () => ({
       workerUrl: workerUrlState,
@@ -191,6 +301,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       next,
       prev,
       seekToFraction,
+      likedTracks,
+      isLiked,
+      toggleLiked,
+      playLiked,
+      playlists,
+      createPlaylist,
+      deletePlaylist,
+      renamePlaylist,
+      addTrackToPlaylist,
+      removeTrackFromPlaylist,
+      playPlaylist,
+      getPlaylist,
     }),
     [
       workerUrlState,
@@ -208,6 +330,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       next,
       prev,
       seekToFraction,
+      likedTracks,
+      isLiked,
+      toggleLiked,
+      playLiked,
+      playlists,
+      createPlaylist,
+      deletePlaylist,
+      renamePlaylist,
+      addTrackToPlaylist,
+      removeTrackFromPlaylist,
+      playPlaylist,
+      getPlaylist,
     ]
   );
 

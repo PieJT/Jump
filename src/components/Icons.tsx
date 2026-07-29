@@ -66,3 +66,68 @@ export function PauseIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function LibraryIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>
+      <path d="M4 4v16M4 4l7 2v14l-7-2z" />
+      <path d="M14 6h6M14 11h6M14 16h4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function HeartIcon({ filled, ...props }: SVGProps<SVGSVGElement> & { filled?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={2}
+      {...props}
+    >
+      <path d="M12 20.5s-7.5-4.6-10-9.3C.4 8 1.7 4.5 5 3.4c2-.7 4.1 0 5.5 1.8L12 6.8l1.5-1.6c1.4-1.8 3.5-2.5 5.5-1.8 3.3 1.1 4.6 4.6 3 7.8-2.5 4.7-10 9.3-10 9.3z" />
+    </svg>
+  );
+}
+
+export function PlusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>
+      <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function MoreIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <circle cx="12" cy="5" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="12" cy="19" r="1.8" />
+    </svg>
+  );
+}
+
+export function BackIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>
+      <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function TrashIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>
+      <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function CheckIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} {...props}>
+      <path d="M4 12.5 9.2 18 20 6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}

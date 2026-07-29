@@ -1,5 +1,5 @@
 import type { ViewName } from "../types";
-import { HomeIcon, SearchIcon, QueueIcon, WorkerIcon } from "./Icons";
+import { HomeIcon, SearchIcon, QueueIcon, LibraryIcon, WorkerIcon } from "./Icons";
 
 interface SidebarProps {
   activeView: ViewName;
@@ -27,6 +27,13 @@ export function Sidebar({ activeView, onNavigate, workerConnected, onOpenWorkerM
         <div className={`nav-item${activeView === "queue" ? " active" : ""}`} onClick={() => onNavigate("queue")}>
           <QueueIcon />
           Queue
+        </div>
+        <div
+          className={`nav-item${activeView === "library" || activeView === "playlist" ? " active" : ""}`}
+          onClick={() => onNavigate("library")}
+        >
+          <LibraryIcon />
+          Library
         </div>
       </nav>
       <div className="sidebar-spacer" />

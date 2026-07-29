@@ -5,14 +5,24 @@ import { auroraGradient } from "../lib/gradient";
 import { RECOMMENDED_PLAYLISTS, RECOMMENDED_ARTISTS } from "../lib/recommendations";
 import { RowItem } from "./RowItem";
 import { EmptyState } from "./EmptyState";
-import { PlayIcon } from "./Icons";
+import { HeartIcon, PlayIcon } from "./Icons";
 
 interface HomeViewProps {
   onNeedWorker?: () => void;
+  onOpenPlaylist?: (id: string) => void;
 }
 
-export function HomeView({ onNeedWorker }: HomeViewProps) {
-  const { workerUrl, recentlyPlayed, currentTrack, isPlaying, playRecent, playFromResults } = usePlayer();
+export function HomeView({ onNeedWorker, onOpenPlaylist }: HomeViewProps) {
+  const {
+    workerUrl,
+    recentlyPlayed,
+    currentTrack,
+    isPlaying,
+    playRecent,
+    playFromResults,
+    likedTracks,
+    playlists,
+  } = usePlayer();
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // Representative artwork per tile, keyed by its seed query/name — pulled
@@ -66,10 +76,41 @@ export function HomeView({ onNeedWorker }: HomeViewProps) {
     }
   };
 
+  const recentPlaylists = playlists.slice(0, 3);
+  const showLibraryRow = likedTracks.length > 0 || recentPlaylists.length > 0;
+
   return (
     <section className="view active">
       <div className="page-title">Good listening</div>
       <div className="page-sub">Fresh picks to get you moving — tap anything to start.</div>
+
+      {showLibraryRow && onOpenPlaylist && (
+        <>
+          <div className="section-label">Jump back in</div>
+          <div className="quick-grid">
+            {likedTracks.length > 0 && (
+              <div className="quick-card" onClick={() => onOpenPlaylist("liked")}>
+                <div className="quick-art liked-art">
+                  <HeartIcon filled width={20} height={20} />
+                </div>
+                <span>Liked Songs</span>
+              </div>
+            )}
+            {recentPlaylists.map((p) => (
+              <div key={p.id} className="quick-card" onClick={() => onOpenPlaylist(p.id)}>
+                <div className="quick-art">
+                  {p.tracks[0]?.thumb ? (
+                    <img src={p.tracks[0].thumb} alt="" loading="lazy" />
+                  ) : (
+                    <PlayIcon width={16} height={16} />
+                  )}
+                </div>
+                <span>{p.name}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <div className="section-label">Recommended playlists</div>
       <div className="rec-grid">
