@@ -8,21 +8,39 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import type { Playlist, Track } from "../types";
 import { useYouTubePlayer } from "./useYouTubePlayer";
 import { useAuth } from "./AuthContext";
 import { db } from "../lib/firebase";
 import { extractDominantColor } from "../lib/color";
+import { searchTracks } from "../lib/youtubeMusic";
 
 const WORKER_URL_STORAGE_KEY = "aura:workerUrl";
 const PLAYLISTS_STORAGE_KEY = "aura:playlists";
 const LIKED_STORAGE_KEY = "aura:liked";
+const AUTO_QUEUE_STORAGE_KEY = "aura:autoQueue";
 const RECENTS_LIMIT = 12;
+// Auto-fill kicks in once the listener is this many tracks (or fewer) from
+// the end of the queue, so the next batch has time to load before it's needed.
+const AUTO_FILL_THRESHOLD = 2;
+const AUTO_FILL_BATCH_SIZE = 5;
 
 interface Progress {
   current: number;
   duration: number;
+}
+
+interface StoredPlayback {
+  track: Track;
+  positionSeconds: number;
+  updatedAt: number;
+}
+
+interface SharedPlaylistPreview {
+  shareId: string;
+  name: string;
+  tracks: Track[];
 }
 
 function readJSON<T>(key: string, fallback: T): T {
@@ -76,6 +94,28 @@ interface PlayerContextValue {
   removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
   playPlaylist: (playlistId: string, startIndex?: number) => void;
   getPlaylist: (playlistId: string) => Playlist | undefined;
+  /** Reorders a track within a saved playlist (not the "Liked Songs" pseudo-playlist). */
+  reorderPlaylistTracks: (playlistId: string, fromIndex: number, toIndex: number) => void;
+
+  // ---- Smart queue / auto-fill ----
+  /** When on, similar tracks are appended automatically as the queue runs low. */
+  autoQueueEnabled: boolean;
+  setAutoQueueEnabled: (enabled: boolean) => void;
+  isAutoFilling: boolean;
+
+  // ---- Cross-device resume ----
+  /** Set when Firestore has playback saved from another session; null once resumed/dismissed. */
+  resumePrompt: StoredPlayback | null;
+  resumePlayback: () => void;
+  dismissResumePrompt: () => void;
+
+  // ---- Shareable playlists ----
+  /** Publishes the playlist and resolves with a shareable URL. */
+  sharePlaylist: (playlistId: string) => Promise<string>;
+  /** Set when the current URL contains a `?playlist=<id>` link someone shared. */
+  sharedImportPrompt: SharedPlaylistPreview | null;
+  confirmImportSharedPlaylist: () => Promise<void>;
+  dismissImportPrompt: () => void;
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -93,6 +133,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [progress, setProgress] = useState<Progress>({ current: 0, duration: 0 });
   const [recentlyPlayed, setRecentlyPlayed] = useState<Track[]>([]);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [autoQueueEnabled, setAutoQueueEnabledState] = useState<boolean>(
+    () => readJSON(AUTO_QUEUE_STORAGE_KEY, true)
+  );
+  const [isAutoFilling, setIsAutoFilling] = useState(false);
+  // Populated from Firestore when a signed-in account has playback saved from
+  // another device/session; cleared once the user resumes it or dismisses it.
+  const [resumePrompt, setResumePrompt] = useState<StoredPlayback | null>(null);
 
   // Seeded from localStorage first so the UI has something to show instantly;
   // Firestore then takes over as the source of truth once it loads (see below).
@@ -126,10 +173,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       userDoc,
       (snap) => {
         if (snap.exists()) {
-          const data = snap.data() as { likedTracks?: Track[]; playlists?: Playlist[] };
+          const data = snap.data() as {
+            likedTracks?: Track[];
+            playlists?: Playlist[];
+            lastPlayback?: StoredPlayback;
+          };
           skipNextWriteRef.current = true;
           setLikedTracks(data.likedTracks ?? []);
           setPlaylists(data.playlists ?? []);
+          // Only offer to resume if nothing is already queued up locally (i.e.
+          // this is a fresh sign-in/reload) — don't interrupt an active session.
+          if (data.lastPlayback?.track && currentIndexRef.current === -1) {
+            setResumePrompt(data.lastPlayback);
+          }
         } else {
           // First time this account has signed in — seed their Firestore doc with
           // whatever's already sitting in this browser's local storage.
@@ -180,6 +236,54 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const addToRecent = useCallback((track: Track) => {
     setRecentlyPlayed((prev) => [track, ...prev.filter((t) => t.id !== track.id)].slice(0, RECENTS_LIMIT));
+  }, []);
+
+  // ---------- Smart queue / auto-fill ----------
+  // Once the listener gets within AUTO_FILL_THRESHOLD tracks of the end of the
+  // queue, fetch more tracks by the current artist and append them so playback
+  // never just stops. Guards against overlapping fetches with a ref (not state,
+  // so it can't race with the effect that reads it).
+  const autoFillInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!autoQueueEnabled || !workerUrlState) return;
+    if (currentIndex < 0 || autoFillInFlightRef.current) return;
+
+    const remaining = queue.length - 1 - currentIndex;
+    if (remaining > AUTO_FILL_THRESHOLD) return;
+
+    const seedTrack = queue[currentIndex];
+    if (!seedTrack) return;
+
+    autoFillInFlightRef.current = true;
+    setIsAutoFilling(true);
+
+    searchTracks(workerUrlState, seedTrack.artist)
+      .then((results) => {
+        setQueue((prev) => {
+          // Bail if the queue moved on to something else entirely while this
+          // request was in flight (e.g. the user played a different track/list).
+          if (prev[currentIndex]?.id !== seedTrack.id) return prev;
+          const existingIds = new Set(prev.map((t) => t.id));
+          const toAdd = results.filter((t) => !existingIds.has(t.id)).slice(0, AUTO_FILL_BATCH_SIZE);
+          if (toAdd.length === 0) return prev;
+          const next = [...prev, ...toAdd];
+          queueRef.current = next;
+          return next;
+        });
+      })
+      .catch((err) => {
+        console.error("[AutoQueue] failed to fetch similar tracks:", err);
+      })
+      .finally(() => {
+        autoFillInFlightRef.current = false;
+        setIsAutoFilling(false);
+      });
+  }, [queue, currentIndex, autoQueueEnabled, workerUrlState]);
+
+  const setAutoQueueEnabled = useCallback((enabled: boolean) => {
+    setAutoQueueEnabledState(enabled);
+    localStorage.setItem(AUTO_QUEUE_STORAGE_KEY, JSON.stringify(enabled));
   }, []);
 
   const playIndex = useCallback(
@@ -234,6 +338,42 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setWorkerUrlState(cleaned);
     localStorage.setItem(WORKER_URL_STORAGE_KEY, cleaned);
   }, []);
+
+  // ---------- Cross-device resume ----------
+  const resumePlayback = useCallback(() => {
+    if (!resumePrompt) return;
+    const { track, positionSeconds } = resumePrompt;
+    setQueue([track]);
+    queueRef.current = [track];
+    playIndex(0);
+    // loadVideo()/YT's onReady is async, so the seek has to happen after the
+    // player has actually accepted the new video — a short delay is simplest
+    // since useYouTubePlayer doesn't currently expose an "on loaded" callback.
+    window.setTimeout(() => controls.seekTo(positionSeconds), 1200);
+    setResumePrompt(null);
+    // controls is stable, playIndex is stable
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumePrompt, playIndex]);
+
+  const dismissResumePrompt = useCallback(() => setResumePrompt(null), []);
+
+  // Periodically (roughly every 10s of active playback) persist the current
+  // track + position so it can be picked up as a "resume" prompt on another
+  // device/session. Throttled with a ref rather than a timer so it piggybacks
+  // on the existing progress-tick updates instead of running its own interval.
+  const lastPlaybackWriteRef = useRef(0);
+  useEffect(() => {
+    const track = currentIndex >= 0 ? queue[currentIndex] : null;
+    if (!uid || !track || !isPlaying) return;
+    const now = Date.now();
+    if (now - lastPlaybackWriteRef.current < 10_000) return;
+    lastPlaybackWriteRef.current = now;
+
+    const payload: StoredPlayback = { track, positionSeconds: Math.floor(progress.current), updatedAt: now };
+    setDoc(doc(db, "users", uid), { lastPlayback: payload }, { merge: true }).catch((err) =>
+      console.error("[Firestore] failed to write playback position:", err)
+    );
+  }, [uid, queue, currentIndex, isPlaying, progress]);
 
   const playFromResults = useCallback(
     (tracks: Track[], startIndex: number) => {
@@ -362,6 +502,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const reorderPlaylistTracks = useCallback((playlistId: string, fromIndex: number, toIndex: number) => {
+    setPlaylists((prev) =>
+      prev.map((p) => {
+        if (p.id !== playlistId) return p;
+        if (
+          fromIndex === toIndex ||
+          fromIndex < 0 ||
+          toIndex < 0 ||
+          fromIndex >= p.tracks.length ||
+          toIndex >= p.tracks.length
+        ) {
+          return p;
+        }
+        const tracks = [...p.tracks];
+        const [moved] = tracks.splice(fromIndex, 1);
+        tracks.splice(toIndex, 0, moved);
+        return { ...p, tracks };
+      })
+    );
+  }, []);
+
   const playPlaylist = useCallback(
     (playlistId: string, startIndex = 0) => {
       const playlist = playlistsRef.current.find((p) => p.id === playlistId);
@@ -373,6 +534,69 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     },
     [playIndex]
   );
+
+  // ---------- Shareable playlists ----------
+  // Publishes a *copy* of the playlist's tracks to a public `sharedPlaylists/{id}`
+  // Firestore doc (separate from the user's own private `users/{uid}` doc), and
+  // returns a link containing that doc's id. NOTE: this requires Firestore
+  // security rules that allow public read (and authenticated create) on the
+  // `sharedPlaylists` collection — that's a rules change outside this repo.
+  const sharePlaylist = useCallback(
+    async (playlistId: string): Promise<string> => {
+      const playlist = playlistsRef.current.find((p) => p.id === playlistId);
+      if (!playlist) throw new Error("Playlist not found");
+
+      const shareId = makeId();
+      await setDoc(doc(db, "sharedPlaylists", shareId), {
+        name: playlist.name,
+        tracks: playlist.tracks,
+        sharedBy: uid ?? null,
+        createdAt: Date.now(),
+      });
+
+      const url = new URL(window.location.href);
+      url.search = `?playlist=${shareId}`;
+      url.hash = "";
+      return url.toString();
+    },
+    [uid]
+  );
+
+  const [sharedImportPrompt, setSharedImportPrompt] = useState<SharedPlaylistPreview | null>(null);
+
+  // On load, if the URL carries a `?playlist=<shareId>` param (from a link someone
+  // shared), fetch the preview so the UI can offer to import it.
+  useEffect(() => {
+    const shareId = new URLSearchParams(window.location.search).get("playlist");
+    if (!shareId) return;
+
+    getDoc(doc(db, "sharedPlaylists", shareId))
+      .then((snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data() as { name?: string; tracks?: Track[] };
+        setSharedImportPrompt({ shareId, name: data.name ?? "Shared Playlist", tracks: data.tracks ?? [] });
+      })
+      .catch((err) => console.error("[Firestore] failed to load shared playlist:", err));
+  }, []);
+
+  const clearShareUrlParam = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("playlist");
+    window.history.replaceState({}, "", url.toString());
+  };
+
+  const confirmImportSharedPlaylist = useCallback(async () => {
+    if (!sharedImportPrompt) return;
+    const playlist = createPlaylist(sharedImportPrompt.name);
+    sharedImportPrompt.tracks.forEach((track) => addTrackToPlaylist(playlist.id, track));
+    setSharedImportPrompt(null);
+    clearShareUrlParam();
+  }, [sharedImportPrompt, createPlaylist, addTrackToPlaylist]);
+
+  const dismissImportPrompt = useCallback(() => {
+    setSharedImportPrompt(null);
+    clearShareUrlParam();
+  }, []);
 
   const value = useMemo<PlayerContextValue>(
     () => ({
@@ -405,6 +629,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       removeTrackFromPlaylist,
       playPlaylist,
       getPlaylist,
+      reorderPlaylistTracks,
+      autoQueueEnabled,
+      setAutoQueueEnabled,
+      isAutoFilling,
+      resumePrompt,
+      resumePlayback,
+      dismissResumePrompt,
+      sharePlaylist,
+      sharedImportPrompt,
+      confirmImportSharedPlaylist,
+      dismissImportPrompt,
     }),
     [
       workerUrlState,
@@ -435,6 +670,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       removeTrackFromPlaylist,
       playPlaylist,
       getPlaylist,
+      reorderPlaylistTracks,
+      autoQueueEnabled,
+      setAutoQueueEnabled,
+      isAutoFilling,
+      resumePrompt,
+      resumePlayback,
+      dismissResumePrompt,
+      sharePlaylist,
+      sharedImportPrompt,
+      confirmImportSharedPlaylist,
+      dismissImportPrompt,
     ]
   );
 
@@ -445,4 +691,4 @@ export function usePlayer(): PlayerContextValue {
   const ctx = useContext(PlayerContext);
   if (!ctx) throw new Error("usePlayer must be used within a PlayerProvider");
   return ctx;
-}
+} 

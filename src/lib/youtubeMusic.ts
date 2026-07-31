@@ -15,6 +15,11 @@ export async function searchTracks(
 
   const url = `${workerUrl.replace(/\/+$/, "")}/search?q=${encodeURIComponent(query)}`;
   const res = await fetch(url, { signal });
+
+  if (!res.ok) {
+    throw new Error(`Search request failed (${res.status})`);
+  }
+
   const data: SearchResponse = await res.json();
 
   if (data.error) throw new Error(data.error);

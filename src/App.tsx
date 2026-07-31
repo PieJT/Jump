@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ViewName } from "./types";
 import { PlayerProvider, usePlayer } from "./hooks/PlayerContext";
 import { AuthProvider, useAuth } from "./hooks/AuthContext";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { LoginPage } from "./components/LoginPage";
 import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
@@ -14,10 +15,13 @@ import { MiniPlayer } from "./components/MiniPlayer";
 import { NowPlayingFull } from "./components/NowPlayingFull";
 import { WorkerUrlModal } from "./components/WorkerUrlModal";
 import { AccountModal } from "./components/AccountModal";
+import { ResumeBanner } from "./components/ResumeBanner";
+import { ImportSharedPlaylistModal } from "./components/ImportSharedPlaylistModal";
 import "./App.css";
 
 function AppShell() {
   const { workerUrl } = usePlayer();
+  useKeyboardShortcuts();
   const [view, setView] = useState<ViewName>("home");
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [fullPlayerOpen, setFullPlayerOpen] = useState(false);
@@ -59,6 +63,7 @@ function AppShell() {
           )}
         </main>
 
+        <ResumeBanner />
         <MiniPlayer onOpenFullPlayer={() => setFullPlayerOpen(true)} />
 
         <TabBar
@@ -72,6 +77,7 @@ function AppShell() {
       <NowPlayingFull open={fullPlayerOpen} onClose={() => setFullPlayerOpen(false)} />
       <WorkerUrlModal open={workerModalOpen} onClose={() => setWorkerModalOpen(false)} />
       <AccountModal open={accountModalOpen} onClose={() => setAccountModalOpen(false)} />
+      <ImportSharedPlaylistModal />
 
       {/* Hidden target the YouTube IFrame API mounts into */}
       <div id="yt-target" />

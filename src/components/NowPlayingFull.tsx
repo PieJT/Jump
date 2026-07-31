@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePlayer } from "../hooks/PlayerContext";
 import { formatTime } from "../lib/time";
+import { fetchLyrics } from "../lib/lyrics";
 import { PauseIcon, PlayIcon, PrevIcon, NextIcon } from "./Icons";
 
 interface NowPlayingFullProps {
@@ -10,11 +11,47 @@ interface NowPlayingFullProps {
 
 const CLOSE_DISTANCE = 110;
 
+type LyricsState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; lyrics: string }
+  | { status: "empty" }
+  | { status: "error"; message: string };
+
 export function NowPlayingFull({ open, onClose }: NowPlayingFullProps) {
-  const { currentTrack, isPlaying, progress, togglePlay, next, prev, seekToFraction } = usePlayer();
+  const { currentTrack, isPlaying, progress, togglePlay, next, prev, seekToFraction, workerUrl } = usePlayer();
   const startYRef = useRef<number | null>(null);
   const [dragY, setDragY] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [lyricsState, setLyricsState] = useState<LyricsState>({ status: "idle" });
+
+  // Fetch lyrics whenever the panel is open and the track changes (not eagerly
+  // on every track change, since most listeners won't open it every song).
+  useEffect(() => {
+    if (!lyricsOpen || !currentTrack) return;
+    if (!workerUrl) {
+      setLyricsState({ status: "error", message: "Connect a Worker URL first (see the worker icon in the sidebar)." });
+      return;
+    }
+
+    let cancelled = false;
+    setLyricsState({ status: "loading" });
+
+    fetchLyrics(workerUrl, currentTrack.title, currentTrack.artist)
+      .then((result) => {
+        if (cancelled) return;
+        setLyricsState(result.lyrics ? { status: "ready", lyrics: result.lyrics } : { status: "empty" });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLyricsState({ status: "error", message: err instanceof Error ? err.message : "Failed to load lyrics" });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lyricsOpen, currentTrack, workerUrl]);
 
   if (!currentTrack) return null;
 
@@ -94,7 +131,24 @@ export function NowPlayingFull({ open, onClose }: NowPlayingFullProps) {
               <NextIcon />
             </button>
           </div>
+
+          <button
+            type="button"
+            className="npf-lyrics-toggle"
+            onClick={() => setLyricsOpen((v) => !v)}
+          >
+            {lyricsOpen ? "Hide lyrics" : "Show lyrics"}
+          </button>
         </div>
+
+        {lyricsOpen && (
+          <div className="npf-lyrics-panel">
+            {lyricsState.status === "loading" && <p className="npf-lyrics-status">Loading lyrics…</p>}
+            {lyricsState.status === "empty" && <p className="npf-lyrics-status">No lyrics found for this track.</p>}
+            {lyricsState.status === "error" && <p className="npf-lyrics-status">{lyricsState.message}</p>}
+            {lyricsState.status === "ready" && <pre className="npf-lyrics-text">{lyricsState.lyrics}</pre>}
+          </div>
+        )}
       </div>
     </div>
   );
