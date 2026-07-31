@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePlayer } from "../hooks/PlayerContext";
 import { formatTime } from "../lib/time";
 import { fetchLyrics } from "../lib/lyrics";
-import { PauseIcon, PlayIcon, PrevIcon, NextIcon } from "./Icons";
+import { PauseIcon, PlayIcon, PrevIcon, NextIcon, ShuffleIcon, RepeatIcon } from "./Icons";
 
 interface NowPlayingFullProps {
   open: boolean;
@@ -19,7 +19,20 @@ type LyricsState =
   | { status: "error"; message: string };
 
 export function NowPlayingFull({ open, onClose }: NowPlayingFullProps) {
-  const { currentTrack, isPlaying, progress, togglePlay, next, prev, seekToFraction, workerUrl } = usePlayer();
+  const {
+    currentTrack,
+    isPlaying,
+    progress,
+    togglePlay,
+    next,
+    prev,
+    seekToFraction,
+    workerUrl,
+    shuffleEnabled,
+    toggleShuffle,
+    repeatMode,
+    toggleRepeatMode,
+  } = usePlayer();
   const startYRef = useRef<number | null>(null);
   const [dragY, setDragY] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -121,6 +134,13 @@ export function NowPlayingFull({ open, onClose }: NowPlayingFullProps) {
             </div>
           </div>
           <div className="npf-controls">
+            <button
+              className={`icon-btn shuffle-btn${shuffleEnabled ? " active" : ""}`}
+              onClick={toggleShuffle}
+              aria-label="Shuffle"
+            >
+              <ShuffleIcon active={shuffleEnabled} />
+            </button>
             <button className="icon-btn" onClick={prev} aria-label="Previous">
               <PrevIcon />
             </button>
@@ -129,6 +149,13 @@ export function NowPlayingFull({ open, onClose }: NowPlayingFullProps) {
             </button>
             <button className="icon-btn" onClick={next} aria-label="Next">
               <NextIcon />
+            </button>
+            <button
+              className={`icon-btn repeat-btn${repeatMode !== "none" ? " active" : ""}`}
+              onClick={toggleRepeatMode}
+              aria-label="Repeat"
+            >
+              <RepeatIcon mode={repeatMode} />
             </button>
           </div>
 

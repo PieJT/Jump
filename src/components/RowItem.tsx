@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Track } from "../types";
 import { usePlayer } from "../hooks/PlayerContext";
-import { HeartIcon, PlusIcon, TrashIcon } from "./Icons";
+import { HeartIcon, PlusIcon, TrashIcon, PlayNextIcon, AddToQueueIcon } from "./Icons";
 import { AddToPlaylistModal } from "./AddToPlaylistModal";
 
 interface RowItemProps {
@@ -14,7 +14,7 @@ interface RowItemProps {
 }
 
 export function RowItem({ track, active, playing, onClick, onRemove }: RowItemProps) {
-  const { isLiked, toggleLiked } = usePlayer();
+  const { isLiked, toggleLiked, playNext, addToQueue } = usePlayer();
   const [menuOpen, setMenuOpen] = useState(false);
   const liked = isLiked(track.id);
 
@@ -37,8 +37,33 @@ export function RowItem({ track, active, playing, onClick, onRemove }: RowItemPr
       <div className="row-actions">
         <button
           type="button"
+          className="row-action-btn"
+          aria-label="Play next"
+          title="Play next"
+          onClick={(e) => {
+            e.stopPropagation();
+            playNext(track);
+          }}
+        >
+          <PlayNextIcon />
+        </button>
+        <button
+          type="button"
+          className="row-action-btn"
+          aria-label="Add to queue"
+          title="Add to queue"
+          onClick={(e) => {
+            e.stopPropagation();
+            addToQueue(track);
+          }}
+        >
+          <AddToQueueIcon />
+        </button>
+        <button
+          type="button"
           className={`row-action-btn${liked ? " liked" : ""}`}
           aria-label={liked ? "Unlike" : "Like"}
+          title={liked ? "Unlike" : "Like"}
           onClick={(e) => {
             e.stopPropagation();
             toggleLiked(track);
@@ -50,6 +75,7 @@ export function RowItem({ track, active, playing, onClick, onRemove }: RowItemPr
           type="button"
           className="row-action-btn"
           aria-label="Add to playlist"
+          title="Add to playlist"
           onClick={(e) => {
             e.stopPropagation();
             setMenuOpen(true);
@@ -62,6 +88,7 @@ export function RowItem({ track, active, playing, onClick, onRemove }: RowItemPr
             type="button"
             className="row-action-btn"
             aria-label="Remove from playlist"
+            title="Remove from playlist"
             onClick={(e) => {
               e.stopPropagation();
               onRemove();

@@ -140,3 +140,72 @@ export function CheckIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function PlayNextIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>
+      <path d="M3 6h18M3 12h13M3 18h9M18 11l4 4-4 4M22 15h-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function AddToQueueIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>
+      <path d="M3 6h18M3 12h13M3 18h9M16 18h6M19 15v6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function ShuffleIcon({ active, ...props }: SVGProps<SVGSVGElement> & { active?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={active ? "var(--accent)" : "currentColor"}
+      strokeWidth={2}
+      {...props}
+    >
+      <path d="M16 3h5v5M4 20l7-7m5 7h5v-5M4 4l16 16" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function RepeatIcon({ mode, ...props }: SVGProps<SVGSVGElement> & { mode?: "none" | "one" | "all" }) {
+  const isActive = mode !== "none";
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={isActive ? "var(--accent)" : "currentColor"}
+      strokeWidth={2}
+      {...props}
+      style={{ position: "relative", ...props.style }}
+    >
+      <path d="M17 1l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M21 13v2a4 4 0 0 1-4 4H3" strokeLinecap="round" strokeLinejoin="round" />
+      {mode === "one" && (
+        <text
+          x="12"
+          y="15"
+          fontSize="8"
+          fontWeight="bold"
+          fill="var(--accent)"
+          textAnchor="middle"
+          stroke="none"
+        >
+          1
+        </text>
+      )}
+    </svg>
+  );
+}
+
+export function EditIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>
+      <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}

@@ -107,6 +107,7 @@ export function QueueView() {
                   type="button"
                   className="queue-grip"
                   aria-label="Drag to reorder"
+                  title="Drag to reorder"
                   onPointerDown={handleGripPointerDown(i)}
                   onPointerMove={handleGripPointerMove}
                   onPointerUp={endDrag}
@@ -134,6 +135,7 @@ export function QueueView() {
                   type="button"
                   className={`row-action-btn${liked ? " liked" : ""}`}
                   aria-label={liked ? "Unlike" : "Like"}
+                  title={liked ? "Unlike" : "Like"}
                   onClick={() => toggleLiked(track)}
                 >
                   <HeartIcon filled={liked} />
@@ -144,6 +146,7 @@ export function QueueView() {
                     type="button"
                     className="queue-move-btn"
                     aria-label="Move up"
+                    title="Move up"
                     disabled={i === 0}
                     onClick={() => moveUp(i)}
                   >
@@ -153,6 +156,7 @@ export function QueueView() {
                     type="button"
                     className="queue-move-btn"
                     aria-label="Move down"
+                    title="Move down"
                     disabled={i === queue.length - 1}
                     onClick={() => moveDown(i)}
                   >

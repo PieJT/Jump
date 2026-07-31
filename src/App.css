@@ -484,6 +484,24 @@ body {
 .npf-controls .icon-btn:hover { background: rgba(255,255,255,0.12); }
 .npf-controls .play-btn:hover { background: #fff; }
 
+.npf-controls .shuffle-btn,
+.npf-controls .repeat-btn {
+  color: rgba(255, 255, 255, 0.4);
+  transition: color 0.2s ease, background 0.2s ease;
+}
+.npf-controls .shuffle-btn.active,
+.npf-controls .repeat-btn.active {
+  color: var(--accent);
+}
+.npf-controls .shuffle-btn:hover,
+.npf-controls .repeat-btn:hover {
+  color: #fff;
+}
+.npf-controls .shuffle-btn.active:hover,
+.npf-controls .repeat-btn.active:hover {
+  color: var(--accent);
+}
+
 .npf-lyrics-toggle {
   display: block;
   margin: 22px auto 0 auto;
@@ -712,4 +730,26 @@ body {
 .login-reset-sent p { color: var(--text-2); font-size: 14px; margin: 0 0 18px 0; line-height: 1.5; }
 @media (max-width: 500px) {
   .login-card { padding: 28px 22px; }
+}
+
+.playlist-rename-input {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: var(--text-1);
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  border-radius: var(--radius-sm);
+  padding: 2px 10px;
+  outline: none;
+  width: 100%;
+  max-width: 320px;
+}
+.playlist-rename-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(var(--glow-1), 0.25);
+}
+@media (max-width: 860px) {
+  .playlist-rename-input { font-size: 25px; }
 }

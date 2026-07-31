@@ -78,6 +78,12 @@ interface PlayerContextValue {
   seekToFraction: (fraction: number) => void;
   /** Moves the track at fromIndex to toIndex (toIndex given in the resulting array's terms). Keeps the currently-playing track pointed at correctly. */
   reorderQueue: (fromIndex: number, toIndex: number) => void;
+  playNext: (track: Track) => void;
+  addToQueue: (track: Track) => void;
+  shuffleEnabled: boolean;
+  toggleShuffle: () => void;
+  repeatMode: "none" | "one" | "all";
+  toggleRepeatMode: () => void;
 
   // ---- Library: liked songs ----
   likedTracks: Track[];
@@ -137,6 +143,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     () => readJSON(AUTO_QUEUE_STORAGE_KEY, true)
   );
   const [isAutoFilling, setIsAutoFilling] = useState(false);
+  const [shuffleEnabled, setShuffleEnabled] = useState<boolean>(
+    () => readJSON("aura:shuffle", false)
+  );
+  const [repeatMode, setRepeatMode] = useState<"none" | "one" | "all">(
+    () => readJSON("aura:repeat", "none" as const)
+  );
+  const [playedIndices, setPlayedIndices] = useState<number[]>([]);
   // Populated from Firestore when a signed-in account has playback saved from
   // another device/session; cleared once the user resumes it or dismisses it.
   const [resumePrompt, setResumePrompt] = useState<StoredPlayback | null>(null);
@@ -154,6 +167,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem(PLAYLISTS_STORAGE_KEY, JSON.stringify(playlists));
   }, [playlists]);
+
+  useEffect(() => {
+    localStorage.setItem("aura:shuffle", JSON.stringify(shuffleEnabled));
+  }, [shuffleEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem("aura:repeat", JSON.stringify(repeatMode));
+  }, [repeatMode]);
 
   // ---------- Firestore sync: tie liked songs + playlists to the signed-in account ----------
   // `hasLoadedRemoteRef` blocks the write-effect below from firing with stale/local
@@ -233,6 +254,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   currentIndexRef.current = currentIndex;
   const playlistsRef = useRef(playlists);
   playlistsRef.current = playlists;
+  const shuffleEnabledRef = useRef(shuffleEnabled);
+  shuffleEnabledRef.current = shuffleEnabled;
+  const repeatModeRef = useRef(repeatMode);
+  repeatModeRef.current = repeatMode;
+  const playedIndicesRef = useRef(playedIndices);
+  playedIndicesRef.current = playedIndices;
 
   const addToRecent = useCallback((track: Track) => {
     setRecentlyPlayed((prev) => [track, ...prev.filter((t) => t.id !== track.id)].slice(0, RECENTS_LIMIT));
@@ -291,6 +318,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const track = queueRef.current[index];
       if (!track) return;
       setCurrentIndex(index);
+      setPlayedIndices((prev) => {
+        if (prev[prev.length - 1] === index) return prev;
+        return [...prev, index];
+      });
       controls.loadVideo(track.id);
       addToRecent(track);
       void extractDominantColor(track.thumb).then((rgb) => {
@@ -304,10 +335,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [addToRecent]
   );
 
+  const getNextTrackIndex = useCallback((): number => {
+    const q = queueRef.current;
+    const idx = currentIndexRef.current;
+    const shuffle = shuffleEnabledRef.current;
+    const repeat = repeatModeRef.current;
+    const played = playedIndicesRef.current;
+
+    if (q.length === 0) return -1;
+    if (repeat === "one") return idx;
+
+    if (shuffle) {
+      const unplayed = q
+        .map((_, i) => i)
+        .filter((i) => !played.includes(i));
+      
+      if (unplayed.length > 0) {
+        return unplayed[Math.floor(Math.random() * unplayed.length)];
+      } else {
+        if (repeat === "all") {
+          setPlayedIndices([]);
+          return Math.floor(Math.random() * q.length);
+        }
+        return -1;
+      }
+    } else {
+      const nextIdx = idx + 1;
+      if (nextIdx < q.length) {
+        return nextIdx;
+      } else if (repeat === "all") {
+        return 0;
+      }
+      return -1;
+    }
+  }, []);
+
   const controls = useYouTubePlayer({
     onEnded: () => {
-      const nextIndex = currentIndexRef.current + 1;
-      if (nextIndex < queueRef.current.length) playIndex(nextIndex);
+      const nextIndex = getNextTrackIndex();
+      if (nextIndex >= 0) playIndex(nextIndex);
     },
     onError: (code) => {
       const track = queueRef.current[currentIndexRef.current];
@@ -319,8 +385,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           : "unavailable";
       setPlaybackError(track ? `"${track.title}" is ${reason} — skipping` : "Track unavailable — skipping");
 
-      const nextIndex = currentIndexRef.current + 1;
-      if (nextIndex < queueRef.current.length) {
+      const nextIndex = getNextTrackIndex();
+      if (nextIndex >= 0) {
         playIndex(nextIndex);
       } else {
         setIsPlaying(false);
@@ -382,6 +448,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const newQueue = tracks.slice(startIndex);
       setQueue(newQueue);
       queueRef.current = newQueue;
+      setPlayedIndices([]); // Reset shuffle history
       playIndex(0);
     },
     [playIndex]
@@ -395,10 +462,49 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (!track) return;
       setQueue([track]);
       queueRef.current = [track];
+      setPlayedIndices([]); // Reset shuffle history
       playIndex(0);
     },
     [recentlyPlayed, playIndex]
   );
+
+  const playNext = useCallback((track: Track) => {
+    setQueue((prevQueue) => {
+      const nextQueue = [...prevQueue];
+      const insertIndex = currentIndexRef.current === -1 ? 0 : currentIndexRef.current + 1;
+      nextQueue.splice(insertIndex, 0, track);
+      queueRef.current = nextQueue;
+      return nextQueue;
+    });
+
+    if (currentIndexRef.current === -1) {
+      playIndex(0);
+    }
+  }, [playIndex]);
+
+  const addToQueue = useCallback((track: Track) => {
+    setQueue((prevQueue) => {
+      const nextQueue = [...prevQueue, track];
+      queueRef.current = nextQueue;
+      return nextQueue;
+    });
+
+    if (currentIndexRef.current === -1) {
+      playIndex(0);
+    }
+  }, [playIndex]);
+
+  const toggleShuffle = useCallback(() => {
+    setShuffleEnabled((prev) => !prev);
+  }, []);
+
+  const toggleRepeatMode = useCallback(() => {
+    setRepeatMode((prev) => {
+      if (prev === "none") return "all";
+      if (prev === "all") return "one";
+      return "none";
+    });
+  }, []);
 
   const togglePlay = useCallback(() => {
     if (currentIndexRef.current === -1) return;
@@ -407,14 +513,46 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [isPlaying, controls]);
 
   const next = useCallback(() => {
-    const nextIndex = currentIndexRef.current + 1;
-    if (nextIndex < queueRef.current.length) playIndex(nextIndex);
-  }, [playIndex]);
+    const nextIndex = getNextTrackIndex();
+    if (nextIndex >= 0) playIndex(nextIndex);
+  }, [getNextTrackIndex, playIndex]);
 
   const prev = useCallback(() => {
-    const prevIndex = currentIndexRef.current - 1;
-    if (prevIndex >= 0) playIndex(prevIndex);
-  }, [playIndex]);
+    const idx = currentIndexRef.current;
+    const shuffle = shuffleEnabledRef.current;
+    const repeat = repeatModeRef.current;
+    const played = playedIndicesRef.current;
+    const q = queueRef.current;
+
+    if (q.length === 0) return;
+    if (repeat === "one") {
+      playIndex(idx);
+      return;
+    }
+
+    if (shuffle) {
+      if (played.length > 1) {
+        const newPlayed = [...played];
+        newPlayed.pop(); // remove current track index
+        const prevIdx = newPlayed.pop(); // get and remove previous track index
+        setPlayedIndices(newPlayed);
+        if (prevIdx !== undefined && prevIdx < q.length) {
+          playIndex(prevIdx);
+        }
+      } else {
+        controls.seekTo(0);
+      }
+    } else {
+      const prevIndex = idx - 1;
+      if (prevIndex >= 0) {
+        playIndex(prevIndex);
+      } else if (repeat === "all") {
+        playIndex(q.length - 1);
+      } else {
+        controls.seekTo(0);
+      }
+    }
+  }, [playIndex, controls]);
 
   const seekToFraction = useCallback(
     (fraction: number) => {
@@ -463,6 +601,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const newQueue = [...likedTracks];
     setQueue(newQueue);
     queueRef.current = newQueue;
+    setPlayedIndices([]); // Reset shuffle history
     playIndex(0);
   }, [likedTracks, playIndex]);
 
@@ -530,6 +669,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const newQueue = playlist.tracks.slice(startIndex);
       setQueue(newQueue);
       queueRef.current = newQueue;
+      setPlayedIndices([]); // Reset shuffle history
       playIndex(0);
     },
     [playIndex]
@@ -617,6 +757,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       prev,
       seekToFraction,
       reorderQueue,
+      playNext,
+      addToQueue,
+      shuffleEnabled,
+      toggleShuffle,
+      repeatMode,
+      toggleRepeatMode,
       likedTracks,
       isLiked,
       toggleLiked,
@@ -658,6 +804,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       prev,
       seekToFraction,
       reorderQueue,
+      playNext,
+      addToQueue,
+      shuffleEnabled,
+      toggleShuffle,
+      repeatMode,
+      toggleRepeatMode,
       likedTracks,
       isLiked,
       toggleLiked,
