@@ -1,4 +1,5 @@
 import { useAuth } from "../hooks/AuthContext";
+import { DeviceHandoffPanel } from "./DeviceHandoffPanel";
 
 interface AccountModalProps {
   open: boolean;
@@ -25,6 +26,10 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
             <p className="account-email">{user?.email}</p>
           </div>
         </div>
+
+        <div className="section-label">Active devices</div>
+        <DeviceHandoffPanel />
+
         <div className="modal-actions" style={{ justifyContent: "space-between" }}>
           <button className="btn btn-ghost" onClick={onClose}>
             Close

@@ -8,6 +8,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { HomeView } from "./components/HomeView";
 import { SearchView } from "./components/SearchView";
+import { AudiusView } from "./components/AudiusView";
 import { QueueView } from "./components/QueueView";
 import { LibraryView } from "./components/LibraryView";
 import { PlaylistView } from "./components/PlaylistView";
@@ -56,6 +57,7 @@ function AppShell() {
         <main className="content">
           {view === "home" && <HomeView onNeedWorker={() => setWorkerModalOpen(true)} onOpenPlaylist={openPlaylist} />}
           {view === "search" && <SearchView onNeedWorker={() => setWorkerModalOpen(true)} />}
+          {view === "audius" && <AudiusView />}
           {view === "queue" && <QueueView />}
           {view === "library" && <LibraryView onOpenPlaylist={openPlaylist} />}
           {view === "playlist" && selectedPlaylistId && (

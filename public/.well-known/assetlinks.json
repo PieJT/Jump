@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.implament.jump",
+      "sha256_cert_fingerprints": [
+        "F4:82:6F:BA:E5:6E:05:0B:F3:68:8D:F0:67:10:5E:2A:AF:CD:20:EB:44:35:AE:8D:E7:A7:26:4D:ED:6A:96:EC"
+      ]
+    }
+  }
+]

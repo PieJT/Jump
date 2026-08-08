@@ -1,6 +1,6 @@
 import type { ViewName } from "../types";
 import { useAuth } from "../hooks/AuthContext";
-import { HomeIcon, SearchIcon, QueueIcon, LibraryIcon, WorkerIcon } from "./Icons";
+import { HomeIcon, SearchIcon, DiscoverIcon, QueueIcon, LibraryIcon, WorkerIcon } from "./Icons";
 
 interface SidebarProps {
   activeView: ViewName;
@@ -33,6 +33,10 @@ export function Sidebar({
         <div className={`nav-item${activeView === "search" ? " active" : ""}`} onClick={() => onNavigate("search")}>
           <SearchIcon />
           Search
+        </div>
+        <div className={`nav-item${activeView === "audius" ? " active" : ""}`} onClick={() => onNavigate("audius")}>
+          <DiscoverIcon />
+          Discover
         </div>
         <div className={`nav-item${activeView === "queue" ? " active" : ""}`} onClick={() => onNavigate("queue")}>
           <QueueIcon />

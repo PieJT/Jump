@@ -8,13 +8,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import type { Playlist, Track } from "../types";
 import { useYouTubePlayer } from "./useYouTubePlayer";
 import { useAuth } from "./AuthContext";
 import { db } from "../lib/firebase";
 import { extractDominantColor } from "../lib/color";
 import { searchTracks } from "../lib/youtubeMusic";
+import { getDeviceId, getDeviceLabel } from "./useDeviceId";
 
 const WORKER_URL_STORAGE_KEY = "aura:workerUrl";
 const PLAYLISTS_STORAGE_KEY = "aura:playlists";
@@ -25,6 +26,14 @@ const RECENTS_LIMIT = 12;
 // the end of the queue, so the next batch has time to load before it's needed.
 const AUTO_FILL_THRESHOLD = 2;
 const AUTO_FILL_BATCH_SIZE = 5;
+// How often each device refreshes its "I'm here, this is what's playing" doc.
+const DEVICE_PRESENCE_INTERVAL = 15_000;
+// Devices not heard from in this long are dropped from the visible list.
+const DEVICE_STALE_AFTER = 45_000;
+// Ignore a remote command older than this (clock skew / stale doc safety net).
+const REMOTE_COMMAND_MAX_AGE = 10_000;
+// How long an "undo" toast stays actionable before it's discarded.
+const UNDO_TIMEOUT_MS = 6000;
 
 interface Progress {
   current: number;
@@ -41,6 +50,28 @@ interface SharedPlaylistPreview {
   shareId: string;
   name: string;
   tracks: Track[];
+}
+
+interface DeviceInfo {
+  id: string;
+  label: string;
+  lastSeenAt: number;
+  isPlaying: boolean;
+  trackTitle: string | null;
+  trackArtist: string | null;
+}
+
+type RemoteCommandType = "play" | "pause" | "next" | "prev";
+
+interface RemoteCommand {
+  type: RemoteCommandType;
+  issuedAt: number;
+  issuedBy: string;
+}
+
+interface UndoState {
+  message: string;
+  undo: () => void;
 }
 
 function readJSON<T>(key: string, fallback: T): T {
@@ -115,6 +146,19 @@ interface PlayerContextValue {
   resumePlayback: () => void;
   dismissResumePrompt: () => void;
 
+  // ---- Multi-device handoff / remote control ----
+  /** This browser's stable device id (persisted in localStorage). */
+  thisDeviceId: string;
+  /** Other signed-in devices seen recently, most-recently-active first. */
+  devices: DeviceInfo[];
+  /** Sends a transport command to another device; that device executes it and the command is consumed. */
+  sendRemoteCommand: (targetDeviceId: string, type: RemoteCommandType) => void;
+
+  // ---- Generic undo ----
+  /** Set right after a destructive action (e.g. removing a track) that supports undo; null once dismissed/expired. */
+  undoState: UndoState | null;
+  dismissUndo: () => void;
+
   // ---- Shareable playlists ----
   /** Publishes the playlist and resolves with a shareable URL. */
   sharePlaylist: (playlistId: string) => Promise<string>;
@@ -129,6 +173,9 @@ const PlayerContext = createContext<PlayerContextValue | null>(null);
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const uid = user?.uid ?? null;
+
+  // Stable for the lifetime of this browser/profile — generated once and cached in localStorage.
+  const thisDeviceId = useRef(getDeviceId()).current;
 
   const [workerUrlState, setWorkerUrlState] = useState<string>(
     () => localStorage.getItem(WORKER_URL_STORAGE_KEY) ?? ""
@@ -153,6 +200,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // Populated from Firestore when a signed-in account has playback saved from
   // another device/session; cleared once the user resumes it or dismisses it.
   const [resumePrompt, setResumePrompt] = useState<StoredPlayback | null>(null);
+
+  // Other devices this account has been seen active on recently.
+  const [devices, setDevices] = useState<DeviceInfo[]>([]);
+
+  // Generic "undo the last destructive action" toast state.
+  const [undoState, setUndoState] = useState<UndoState | null>(null);
+  const undoTimerRef = useRef<number | null>(null);
 
   // Seeded from localStorage first so the UI has something to show instantly;
   // Firestore then takes over as the source of truth once it loads (see below).
@@ -198,6 +252,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             likedTracks?: Track[];
             playlists?: Playlist[];
             lastPlayback?: StoredPlayback;
+            devices?: Record<string, Omit<DeviceInfo, "id">>;
           };
           skipNextWriteRef.current = true;
           setLikedTracks(data.likedTracks ?? []);
@@ -206,6 +261,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           // this is a fresh sign-in/reload) — don't interrupt an active session.
           if (data.lastPlayback?.track && currentIndexRef.current === -1) {
             setResumePrompt(data.lastPlayback);
+          }
+
+          if (data.devices) {
+            const now = Date.now();
+            const list: DeviceInfo[] = Object.entries(data.devices)
+              .map(([id, info]) => ({ id, ...info }))
+              .filter((d) => d.id !== thisDeviceId && now - d.lastSeenAt < DEVICE_STALE_AFTER)
+              .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+            setDevices(list);
+          } else {
+            setDevices([]);
           }
         } else {
           // First time this account has signed in — seed their Firestore doc with
@@ -221,7 +287,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     );
 
     return () => unsubscribe();
-  }, [uid]);
+  }, [uid, thisDeviceId]);
 
   useEffect(() => {
     if (!uid) return;
@@ -233,9 +299,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // Debounced so rapid changes (e.g. adding several tracks in a row) don't
     // trigger a Firestore write per keystroke/click.
     const timer = window.setTimeout(() => {
-      setDoc(doc(db, "users", uid), { likedTracks, playlists }, { merge: true }).catch((err) =>
-        console.error("[Firestore] failed to write playlists/liked:", err)
-      );
+      try {
+        // setDoc() throws *synchronously* (not just a rejected promise) if any
+        // field anywhere in the payload is `undefined` — a round-trip through
+        // JSON strips those out safely without hand-sanitizing every track.
+        const safePayload = JSON.parse(JSON.stringify({ likedTracks, playlists }));
+        setDoc(doc(db, "users", uid), safePayload, { merge: true }).catch((err) =>
+          console.error("[Firestore] failed to write playlists/liked:", err)
+        );
+      } catch (err) {
+        console.error("[Firestore] failed to serialize playlists/liked for write:", err);
+      }
     }, 600);
     return () => window.clearTimeout(timer);
   }, [uid, likedTracks, playlists]);
@@ -349,7 +423,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const unplayed = q
         .map((_, i) => i)
         .filter((i) => !played.includes(i));
-      
+
       if (unplayed.length > 0) {
         return unplayed[Math.floor(Math.random() * unplayed.length)];
       } else {
@@ -440,6 +514,83 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       console.error("[Firestore] failed to write playback position:", err)
     );
   }, [uid, queue, currentIndex, isPlaying, progress]);
+
+  // ---------- Multi-device handoff: presence broadcast ----------
+  // Piggybacks on the same progress-tick throttle pattern as the resume writer
+  // above — refreshes this device's "I'm here, this is what's playing" entry
+  // roughly every DEVICE_PRESENCE_INTERVAL while there's something to report.
+  const lastPresenceWriteRef = useRef(0);
+  useEffect(() => {
+    if (!uid) return;
+    const now = Date.now();
+    if (now - lastPresenceWriteRef.current < DEVICE_PRESENCE_INTERVAL) return;
+    lastPresenceWriteRef.current = now;
+
+    const track = currentIndex >= 0 ? queue[currentIndex] : null;
+    setDoc(
+      doc(db, "users", uid),
+      {
+        devices: {
+          [thisDeviceId]: {
+            label: getDeviceLabel(),
+            lastSeenAt: now,
+            isPlaying,
+            trackTitle: track?.title ?? null,
+            trackArtist: track?.artist ?? null,
+          },
+        },
+      },
+      { merge: true }
+    ).catch((err) => console.error("[Firestore] failed to write device presence:", err));
+  }, [uid, thisDeviceId, isPlaying, queue, currentIndex, progress.current]);
+
+  // ---------- Multi-device handoff: remote command channel ----------
+  // Each device listens on its own doc, keyed by uid+deviceId, for a single
+  // pending command. Executing it deletes the doc so it can't be replayed.
+  useEffect(() => {
+    if (!uid) return;
+    const cmdDoc = doc(db, "remoteCommands", `${uid}_${thisDeviceId}`);
+    const unsubscribe = onSnapshot(cmdDoc, (snap) => {
+      if (!snap.exists()) return;
+      const cmd = snap.data() as RemoteCommand;
+
+      if (Date.now() - cmd.issuedAt > REMOTE_COMMAND_MAX_AGE) {
+        console.log("[RemoteCommand] dropping stale command:", cmd);
+        deleteDoc(cmdDoc).catch(() => {});
+        return;
+      }
+
+      console.log("[RemoteCommand] executing:", cmd.type);
+
+      if (cmd.type === "play") controls.play();
+      else if (cmd.type === "pause") controls.pause();
+      else if (cmd.type === "next") getNextTrackIndex_thenPlay();
+      else if (cmd.type === "prev") prevRef.current();
+
+      deleteDoc(cmdDoc).catch((err) => console.error("[Firestore] failed to clear remote command:", err));
+    });
+
+    function getNextTrackIndex_thenPlay() {
+      nextRef.current();
+    }
+
+    return () => unsubscribe();
+    // controls is stable; next/prev are wired via refs below so this effect
+    // doesn't need to restart every time they're recreated.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, thisDeviceId]);
+
+  const sendRemoteCommand = useCallback(
+    (targetDeviceId: string, type: RemoteCommandType) => {
+      if (!uid) return;
+      setDoc(doc(db, "remoteCommands", `${uid}_${targetDeviceId}`), {
+        type,
+        issuedAt: Date.now(),
+        issuedBy: thisDeviceId,
+      }).catch((err) => console.error("[Firestore] failed to send remote command:", err));
+    },
+    [uid, thisDeviceId]
+  );
 
   const playFromResults = useCallback(
     (tracks: Track[], startIndex: number) => {
@@ -554,6 +705,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [playIndex, controls]);
 
+  // Refs so the remote-command listener (mounted once per uid/deviceId) can
+  // always call the *current* next/prev without needing to resubscribe.
+  const nextRef = useRef(next);
+  nextRef.current = next;
+  const prevRef = useRef(prev);
+  prevRef.current = prev;
+
   const seekToFraction = useCallback(
     (fraction: number) => {
       const duration = controls.getDuration();
@@ -585,6 +743,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (fromIndex > prevIndex && toIndex <= prevIndex) return prevIndex + 1;
       return prevIndex;
     });
+  }, []);
+
+  // ---------- Generic undo ----------
+  const pushUndo = useCallback((message: string, undo: () => void) => {
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    setUndoState({ message, undo });
+    undoTimerRef.current = window.setTimeout(() => setUndoState(null), UNDO_TIMEOUT_MS);
+  }, []);
+
+  const dismissUndo = useCallback(() => {
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    setUndoState(null);
   }, []);
 
   // ---------- Library: liked songs ----------
@@ -630,11 +800,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const removeTrackFromPlaylist = useCallback((playlistId: string, trackId: string) => {
-    setPlaylists((prev) =>
-      prev.map((p) => (p.id === playlistId ? { ...p, tracks: p.tracks.filter((t) => t.id !== trackId) } : p))
-    );
-  }, []);
+  // Removing now captures a snapshot (index + track) before removing, and
+  // registers an undo that reinserts it at the same position within the
+  // undo window — rather than duplicating the playlist array in state.
+  const removeTrackFromPlaylist = useCallback(
+    (playlistId: string, trackId: string) => {
+      const playlist = playlistsRef.current.find((p) => p.id === playlistId);
+      const removedIndex = playlist?.tracks.findIndex((t) => t.id === trackId) ?? -1;
+      const removedTrack = removedIndex >= 0 ? playlist!.tracks[removedIndex] : null;
+
+      setPlaylists((prev) =>
+        prev.map((p) => (p.id === playlistId ? { ...p, tracks: p.tracks.filter((t) => t.id !== trackId) } : p))
+      );
+
+      if (removedTrack) {
+        pushUndo(`Removed "${removedTrack.title}"`, () => {
+          setPlaylists((prev) =>
+            prev.map((p) => {
+              if (p.id !== playlistId) return p;
+              if (p.tracks.some((t) => t.id === removedTrack.id)) return p; // safety net against double-undo
+              const tracks = [...p.tracks];
+              tracks.splice(Math.min(removedIndex, tracks.length), 0, removedTrack);
+              return { ...p, tracks };
+            })
+          );
+        });
+      }
+    },
+    [pushUndo]
+  );
 
   const getPlaylist = useCallback(
     (playlistId: string) => playlistsRef.current.find((p) => p.id === playlistId),
@@ -782,6 +976,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       resumePrompt,
       resumePlayback,
       dismissResumePrompt,
+      thisDeviceId,
+      devices,
+      sendRemoteCommand,
+      undoState,
+      dismissUndo,
       sharePlaylist,
       sharedImportPrompt,
       confirmImportSharedPlaylist,
@@ -829,6 +1028,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       resumePrompt,
       resumePlayback,
       dismissResumePrompt,
+      thisDeviceId,
+      devices,
+      sendRemoteCommand,
+      undoState,
+      dismissUndo,
       sharePlaylist,
       sharedImportPrompt,
       confirmImportSharedPlaylist,
@@ -843,4 +1047,4 @@ export function usePlayer(): PlayerContextValue {
   const ctx = useContext(PlayerContext);
   if (!ctx) throw new Error("usePlayer must be used within a PlayerProvider");
   return ctx;
-} 
+}

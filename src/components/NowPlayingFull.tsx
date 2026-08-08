@@ -3,6 +3,7 @@ import { usePlayer } from "../hooks/PlayerContext";
 import { formatTime } from "../lib/time";
 import { fetchLyrics } from "../lib/lyrics";
 import { PauseIcon, PlayIcon, PrevIcon, NextIcon, ShuffleIcon, RepeatIcon } from "./Icons";
+import { Visualizer } from "./Visualizer";
 
 interface NowPlayingFullProps {
   open: boolean;
@@ -39,6 +40,12 @@ export function NowPlayingFull({ open, onClose }: NowPlayingFullProps) {
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const [lyricsState, setLyricsState] = useState<LyricsState>({ status: "idle" });
 
+  const seekBarRef = useRef<HTMLDivElement>(null);
+  const [seekDragging, setSeekDragging] = useState(false);
+  // Fraction (0-1) while actively dragging; null when not dragging, so the
+  // bar falls back to actual playback progress.
+  const [seekFraction, setSeekFraction] = useState<number | null>(null);
+
   // Fetch lyrics whenever the panel is open and the track changes (not eagerly
   // on every track change, since most listeners won't open it every song).
   useEffect(() => {
@@ -68,12 +75,32 @@ export function NowPlayingFull({ open, onClose }: NowPlayingFullProps) {
 
   if (!currentTrack) return null;
 
-  const pct = progress.duration ? (progress.current / progress.duration) * 100 : 0;
+  const pct = seekFraction !== null ? seekFraction * 100 : progress.duration ? (progress.current / progress.duration) * 100 : 0;
 
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const fraction = (e.clientX - rect.left) / rect.width;
-    seekToFraction(Math.min(1, Math.max(0, fraction)));
+  const fractionFromClientX = (clientX: number) => {
+    const el = seekBarRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  };
+
+  const handleSeekPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    setSeekDragging(true);
+    setSeekFraction(fractionFromClientX(e.clientX));
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleSeekPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!seekDragging) return;
+    setSeekFraction(fractionFromClientX(e.clientX));
+  };
+
+  const endSeekDrag = () => {
+    if (seekDragging && seekFraction !== null) {
+      seekToFraction(seekFraction);
+    }
+    setSeekDragging(false);
+    setSeekFraction(null);
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -117,6 +144,11 @@ export function NowPlayingFull({ open, onClose }: NowPlayingFullProps) {
 
         <div className="npf-body">
           <div className="npf-art-wrap">
+            <Visualizer
+              trackId={currentTrack.id}
+              currentTime={progress.current}
+              isPlaying={isPlaying}
+            />
             <img className="npf-art" src={currentTrack.thumb} alt="" />
           </div>
           <div className="npf-title">{currentTrack.title}</div>
@@ -125,7 +157,14 @@ export function NowPlayingFull({ open, onClose }: NowPlayingFullProps) {
 
         <div className="npf-controls-block">
           <div className="npf-progress-row">
-            <div className="npf-bar" onClick={handleSeek}>
+            <div
+              className="npf-bar"
+              ref={seekBarRef}
+              onPointerDown={handleSeekPointerDown}
+              onPointerMove={handleSeekPointerMove}
+              onPointerUp={endSeekDrag}
+              onPointerCancel={endSeekDrag}
+            >
               <div className="npf-bar-fill" style={{ width: `${pct}%` }} />
             </div>
             <div className="npf-times">

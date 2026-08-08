@@ -1,6 +1,6 @@
 // Bump this whenever you ship a new build so old caches get cleared out.
 const CACHE_VERSION = "jump-v1";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
+const APP_SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192-jump.png", "/icons/icon-512-jump.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

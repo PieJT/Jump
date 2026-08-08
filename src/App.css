@@ -753,3 +753,47 @@ body {
 @media (max-width: 860px) {
   .playlist-rename-input { font-size: 25px; }
 }
+
+/* ---------- Audius discover ---------- */
+.audius-row .row-actions { position: static; opacity: 1; }
+.audius-duration { flex-shrink: 0; padding: 0 4px; }
+@media (max-width: 500px) { .audius-duration { display: none; } }
+
+.download-btn.download-done { color: var(--accent); }
+.download-btn.download-error { color: #ff9d96; }
+.download-spinner {
+  display: block; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--glass-border); border-top-color: var(--text-1);
+  animation: spin .8s linear infinite;
+}
+
+/* ---------- Offline library ---------- */
+.offline-section-label { display: flex; align-items: center; gap: 10px; }
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+  text-transform: none; letter-spacing: 0; border: 1px solid var(--glass-border);
+}
+.badge-offline { background: rgba(var(--glow-1), 0.12); color: var(--accent); border-color: rgba(var(--glow-1), 0.3); }
+.badge-offline svg { width: 12px; height: 12px; }
+
+.storage-indicator { margin: 0 0 18px 0; }
+.storage-bar { height: 6px; border-radius: 999px; background: var(--glass); overflow: hidden; margin-bottom: 8px; }
+.storage-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--aurora-a), var(--aurora-b)); transition: width .3s ease; }
+.storage-label { font-size: 12.5px; color: var(--text-2); }
+
+.offline-player-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; margin-bottom: 14px; border-radius: var(--radius-md);
+  background: var(--glass); border: 1px solid var(--glass-border);
+}
+.offline-player-bar .row-text { min-width: 0; flex-shrink: 1; }
+.offline-player-scrub {
+  flex: 1; min-width: 60px; height: 4px; border-radius: 999px; background: var(--glass-strong);
+  cursor: pointer; overflow: hidden;
+}
+.offline-player-scrub-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+@media (max-width: 600px) {
+  .offline-player-bar { flex-wrap: wrap; }
+  .offline-player-scrub { order: 3; flex-basis: 100%; }
+}

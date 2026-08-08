@@ -60,12 +60,71 @@ async function handleLyrics(request: Request, env: LyricsEnv): Promise<Response>
   }
 }
 
+// Cloudflare's endpoint for validating a Turnstile response token server-side.
+// https://developers.cloudflare.com/turnstile/get-started/server-side-validation/
+const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+interface TurnstileEnv extends Env {
+  TURNSTILE_SECRET_KEY?: string;
+}
+
+interface TurnstileSiteverifyResponse {
+  success: boolean;
+  "error-codes"?: string[];
+}
+
+async function handleVerifyTurnstile(request: Request, env: TurnstileEnv): Promise<Response> {
+  if (request.method !== "POST") {
+    return Response.json({ success: false, error: "METHOD_NOT_ALLOWED" }, { status: 405 });
+  }
+
+  if (!env.TURNSTILE_SECRET_KEY) {
+    console.error("[worker] TURNSTILE_SECRET_KEY is not configured");
+    return Response.json({ success: false, error: "TURNSTILE_NOT_CONFIGURED" }, { status: 500 });
+  }
+
+  let token: string | undefined;
+  try {
+    const body = (await request.json()) as { token?: string };
+    token = body.token;
+  } catch {
+    return Response.json({ success: false, error: "INVALID_BODY" }, { status: 400 });
+  }
+
+  if (!token) {
+    return Response.json({ success: false, error: "MISSING_TOKEN" }, { status: 400 });
+  }
+
+  const formData = new FormData();
+  formData.append("secret", env.TURNSTILE_SECRET_KEY);
+  formData.append("response", token);
+  const remoteIp = request.headers.get("CF-Connecting-IP");
+  if (remoteIp) formData.append("remoteip", remoteIp);
+
+  try {
+    const verifyRes = await fetch(TURNSTILE_VERIFY_URL, { method: "POST", body: formData });
+    const outcome = (await verifyRes.json()) as TurnstileSiteverifyResponse;
+
+    if (!outcome.success) {
+      return Response.json({ success: false, "error-codes": outcome["error-codes"] }, { status: 200 });
+    }
+    return Response.json({ success: true });
+  } catch (err) {
+    console.error("[worker] Turnstile verification request failed:", err);
+    return Response.json({ success: false, error: "VERIFY_REQUEST_FAILED" }, { status: 502 });
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
     if (url.pathname === "/lyrics" || url.pathname === "/api/lyrics") {
       return handleLyrics(request, env as LyricsEnv);
+    }
+
+    if (url.pathname === "/api/verify-turnstile") {
+      return handleVerifyTurnstile(request, env as TurnstileEnv);
     }
 
     if (url.pathname.startsWith("/api/")) {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { usePlayer } from "../hooks/PlayerContext";
 import { HeartIcon, PlayIcon, PlusIcon, TrashIcon } from "./Icons";
 import { EmptyState } from "./EmptyState";
+import { OfflineLibrary } from "./OfflineLibrary";
 
 interface LibraryViewProps {
   onOpenPlaylist: (id: string) => void;
@@ -111,6 +112,8 @@ export function LibraryView({ onOpenPlaylist }: LibraryViewProps) {
           subtitle="Like a song or create a playlist and it'll show up here."
         />
       )}
+
+      <OfflineLibrary />
     </section>
   );
 }

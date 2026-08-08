@@ -202,6 +202,33 @@ export function RepeatIcon({ mode, ...props }: SVGProps<SVGSVGElement> & { mode?
   );
 }
 
+export function DownloadIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>
+      <path d="M12 4v11m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function DiscoverIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m15 9-2 6-6 2 2-6 6-2z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function OfflineIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>
+      <path d="M6 17a4 4 0 0 1-.6-7.95 5.5 5.5 0 0 1 10.7-1.7A4.5 4.5 0 0 1 17.5 17H6z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m9 21 3-3 3 3M12 13v5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function EditIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} {...props}>

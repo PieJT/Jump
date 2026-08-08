@@ -1,5 +1,22 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useAuth, friendlyAuthError } from "../hooks/AuthContext";
+import { Turnstile, type TurnstileHandle } from "./Turnstile";
+
+/** Verifies a Turnstile token with the Worker before letting an auth call proceed. */
+async function verifyTurnstileToken(token: string): Promise<boolean> {
+  try {
+    const res = await fetch("/api/verify-turnstile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { success: boolean };
+    return data.success;
+  } catch {
+    return false;
+  }
+}
 
 type Mode = "signin" | "signup" | "reset";
 
@@ -35,11 +52,31 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetSent, setResetSent] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileHandle>(null);
 
   const switchMode = (next: Mode) => {
     setMode(next);
     setError(null);
     setResetSent(false);
+  };
+
+  // Runs a Turnstile challenge check before any sign-in/sign-up attempt. Tokens
+  // are single-use, so the widget is reset (issuing a fresh challenge) whenever
+  // verification is missing or fails.
+  const passesBotCheck = async (): Promise<boolean> => {
+    if (!turnstileToken) {
+      setError("Please complete the verification challenge.");
+      return false;
+    }
+    const ok = await verifyTurnstileToken(turnstileToken);
+    if (!ok) {
+      setError("Verification failed — please try the challenge again.");
+      setTurnstileToken(null);
+      turnstileRef.current?.reset();
+      return false;
+    }
+    return true;
   };
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
@@ -66,6 +103,7 @@ export function LoginPage() {
 
     setBusy(true);
     try {
+      if (!(await passesBotCheck())) return;
       if (mode === "signin") await signInEmail(email, password);
       else await signUpEmail(email, password, displayName);
     } catch (err) {
@@ -79,6 +117,7 @@ export function LoginPage() {
     setError(null);
     setBusy(true);
     try {
+      if (!(await passesBotCheck())) return;
       await signInGoogle();
     } catch (err) {
       const message = friendlyAuthError(err);
@@ -91,16 +130,13 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <div className="login-logo">
-          <div className="logo-mark" />
-          <span className="logo-text">Jump</span>
-        </div>
+        <div className="login-logo">Jump</div>
 
         {mode !== "reset" && (
           <>
             <div className="login-heading">
               <h1>{mode === "signin" ? "Welcome back" : "Create your account"}</h1>
-              <p>{mode === "signin" ? "Sign in to get back to your library." : "Takes about a minute."}</p>
+              {mode === "signin" && <p>Sign in to get back to your library.</p>}
             </div>
 
             <div className="login-tabs">
@@ -214,9 +250,25 @@ export function LoginPage() {
               </div>
             )}
 
+            {mode !== "reset" && (
+              <Turnstile
+                ref={turnstileRef}
+                onVerify={(token) => {
+                  setTurnstileToken(token);
+                  setError(null);
+                }}
+                onExpire={() => setTurnstileToken(null)}
+                onError={() => setTurnstileToken(null)}
+              />
+            )}
+
             {error && <div className="login-error">{error}</div>}
 
-            <button type="submit" className="btn btn-primary login-submit" disabled={busy}>
+            <button
+              type="submit"
+              className="btn btn-primary login-submit"
+              disabled={busy || (mode !== "reset" && !turnstileToken)}
+            >
               {busy ? (
                 <span className="login-spinner" />
               ) : mode === "signin" ? (
@@ -241,7 +293,12 @@ export function LoginPage() {
             <div className="login-divider">
               <span>or</span>
             </div>
-            <button type="button" className="login-google-btn" onClick={handleGoogle} disabled={busy}>
+            <button
+              type="button"
+              className="login-google-btn"
+              onClick={handleGoogle}
+              disabled={busy || !turnstileToken}
+            >
               <GoogleGIcon />
               Continue with Google
             </button>
